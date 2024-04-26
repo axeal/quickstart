@@ -149,6 +149,9 @@ module "rancher_common" {
 
   workload_kubernetes_version = var.workload_kubernetes_version
   workload_cluster_name       = "quickstart-azure-custom"
+
+  workload_rke_kubernetes_version = var.workload_rke_kubernetes_version
+  workload_rke_cluster_name   = "quickstart-azure-rke-custom"
 }
 
 # Public IP of quickstart node
@@ -196,6 +199,92 @@ resource "azurerm_linux_virtual_machine" "quickstart-node" {
       "${path.module}/files/userdata_quickstart_node.template",
       {
         register_command = module.rancher_common.custom_cluster_command
+      }
+    )
+  )
+
+  source_image_reference {
+    publisher = "SUSE"
+    offer     = "sles-15-sp2"
+    sku       = "gen2"
+    version   = "latest"
+  }
+
+  admin_ssh_key {
+    username   = local.node_username
+    public_key = tls_private_key.global_key.public_key_openssh
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+  }
+
+  tags = {
+    Creator = "rancher-quickstart"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo 'Waiting for cloud-init to complete...'",
+      "cloud-init status --wait > /dev/null",
+      "echo 'Completed cloud-init!'",
+    ]
+
+    connection {
+      type        = "ssh"
+      host        = self.public_ip_address
+      user        = local.node_username
+      private_key = tls_private_key.global_key.private_key_pem
+    }
+  }
+}
+
+# Public IP of quickstart node
+resource "azurerm_public_ip" "quickstart-rke-node-pip" {
+  name                = "quickstart-rke-node-pip"
+  location            = azurerm_resource_group.rancher-quickstart.location
+  resource_group_name = azurerm_resource_group.rancher-quickstart.name
+  allocation_method   = "Dynamic"
+
+  tags = {
+    Creator = "rancher-quickstart"
+  }
+}
+
+# Azure network interface for quickstart resources
+resource "azurerm_network_interface" "quickstart-rke-node-interface" {
+  name                = "quickstart-rke-node-interface"
+  location            = azurerm_resource_group.rancher-quickstart.location
+  resource_group_name = azurerm_resource_group.rancher-quickstart.name
+
+  ip_configuration {
+    name                          = "rke_ip_config"
+    subnet_id                     = azurerm_subnet.rancher-quickstart-internal.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.quickstart-rke-node-pip.id
+  }
+
+  tags = {
+    Creator = "rancher-quickstart"
+  }
+}
+
+# Azure linux virtual machine for creating a single node RKE cluster and installing the Rancher Server
+resource "azurerm_linux_virtual_machine" "quickstart-rke-node" {
+  name                  = "${var.prefix}-quickstart-rke-node"
+  computer_name         = "${local.computer_name_prefix}-qnr" // ensure computer_name meets 15 character limit
+  location              = azurerm_resource_group.rancher-quickstart.location
+  resource_group_name   = azurerm_resource_group.rancher-quickstart.name
+  network_interface_ids = [azurerm_network_interface.quickstart-rke-node-interface.id]
+  size                  = var.instance_type
+  admin_username        = local.node_username
+
+  custom_data = base64encode(
+    templatefile(
+      "${path.module}/files/userdata_quickstart_rke_node.template",
+      {
+        register_command = module.rancher_common.custom_rke_cluster_command
       }
     )
   )

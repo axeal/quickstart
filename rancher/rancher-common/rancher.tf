@@ -19,3 +19,17 @@ resource "rancher2_cluster_v2" "quickstart_workload" {
   name               = var.workload_cluster_name
   kubernetes_version = var.workload_kubernetes_version
 }
+
+# Create custom managed cluster for quickstart
+resource "rancher2_cluster" "quickstart_workload_rke" {
+  provider = rancher2.admin
+
+  name               = var.workload_rke_cluster_name
+
+  rke_config {
+    kubernetes_version = var.workload_rke_kubernetes_version
+    network {
+      plugin = "canal"
+    }
+  }
+}
